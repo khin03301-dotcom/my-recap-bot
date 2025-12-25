@@ -3,184 +3,207 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Recap Master Pro - Web Edition</title>
+    <title>Recap Master Pro - Ultimate Edition</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Firebase SDKs -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Myanmar:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Noto Sans Myanmar', sans-serif;
+            background: #020617;
+            color: #f1f5f9;
+        }
 
-        // Firebase Configuration (Environment will inject this automatically if using our platform)
-        const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = window.__app_id || 'recap-web-pro';
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
 
-        let currentUser = null;
+        .recap-content {
+            line-height: 2.1;
+            font-size: 1.05rem;
+            color: #cbd5e1;
+        }
 
-        // Auth Logic
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                currentUser = user;
-                loadHistory();
-            } else {
-                signInAnonymously(auth);
+        .recap-content b {
+            color: #10b981;
+            font-weight: 700;
+        }
+
+        .status-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col pb-10">
+
+    <!-- Header -->
+    <header class="p-6 glass-panel sticky top-0 z-50 border-b border-white/5">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center shadow-lg">
+                    <i class="fas fa-robot text-white"></i>
+                </div>
+                <h1 class="text-xl font-bold">Recap <span class="text-emerald-500 font-extrabold">Master</span></h1>
+            </div>
+            <div class="flex gap-2">
+                <span class="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1 rounded-full font-bold uppercase tracking-wider">Stable Version</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-3xl mx-auto w-full p-6 space-y-8">
+        
+        <!-- API Setup Section (Only shows if no Key) -->
+        <div id="api-setup" class="mt-8 bg-blue-500/10 border border-blue-500/20 p-6 rounded-2xl">
+            <h3 class="text-blue-400 font-bold mb-3 flex items-center gap-2">
+                <i class="fas fa-key"></i> Gemini API Key ထည့်သွင်းပါ
+            </h3>
+            <input type="password" id="api-key-input" placeholder="AIzaSy..." class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-sm focus:border-emerald-500 outline-none transition-all">
+            <p class="text-[11px] text-slate-500 mt-2 italic">* သင့် Key ကို ဘယ်နေရာမှာမှ သိမ်းဆည်းမည် မဟုတ်ဘဲ Browser ထဲတွင်သာ အလုပ်လုပ်မည် ဖြစ်သည်။</p>
+        </div>
+
+        <!-- File Upload Area -->
+        <div 
+            onclick="document.getElementById('file-input').click()"
+            class="mt-4 glass-panel p-12 rounded-[2.5rem] border-2 border-dashed border-slate-800 hover:border-emerald-500 transition-all cursor-pointer group text-center"
+        >
+            <div class="w-20 h-20 bg-slate-900 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform shadow-inner">
+                <i class="fas fa-file-upload text-3xl text-emerald-500"></i>
+            </div>
+            <h3 class="text-xl font-bold mb-2">Transcript (.txt) ကို ရွေးချယ်ပါ</h3>
+            <p class="text-slate-500 text-sm">ဖိုင်အကြီးကြီးများကို အပိုင်းလိုက် အသေးစိတ် Recap လုပ်ပေးမည်</p>
+            <input type="file" id="file-input" class="hidden" accept=".txt">
+        </div>
+
+        <!-- Loading State -->
+        <div id="loader" class="hidden text-center space-y-4 py-10">
+            <div class="inline-block w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin"></div>
+            <p id="loader-text" class="text-emerald-400 font-bold status-pulse">လုပ်ဆောင်နေပါသည်...</p>
+        </div>
+
+        <!-- Results Area -->
+        <div id="results" class="space-y-8 pb-20"></div>
+    </main>
+
+    <script>
+        const fileInput = document.getElementById('file-input');
+        const resultsArea = document.getElementById('results');
+        const loader = document.getElementById('loader');
+        const loaderText = document.getElementById('loader-text');
+        const apiKeyInput = document.getElementById('api-key-input');
+
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            const apiKey = apiKeyInput.value.trim();
+
+            if (!apiKey) {
+                alert("ကျေးဇူးပြု၍ Gemini API Key အရင်ထည့်ပါ");
+                fileInput.value = "";
+                return;
+            }
+
+            if (!file) return;
+
+            // UI Reset
+            resultsArea.innerHTML = `<h2 class="text-xl font-bold border-b border-slate-800 pb-4 mb-6"><i class="fas fa-quote-left text-emerald-500 mr-3"></i> Analysis: ${file.name}</h2>`;
+            loader.classList.remove('hidden');
+
+            try {
+                const text = await file.text();
+                // Split text into 7000 character chunks for balance
+                const chunks = splitText(text, 7000);
+
+                for (let i = 0; i < chunks.length; i++) {
+                    loaderText.innerText = `အပိုင်း (${i + 1}/${chunks.length}) ကို အသေးစိတ် ခွဲခြမ်းစိတ်ဖြာနေသည်...`;
+                    const recap = await fetchRecap(chunks[i], i + 1, chunks.length, apiKey);
+                    renderChunk(recap, i + 1);
+                }
+            } catch (err) {
+                renderError(err.message);
+            } finally {
+                loader.classList.add('hidden');
+                fileInput.value = "";
             }
         });
 
-        // UI Logic
-        window.startAnalysis = async () => {
-            const fileInput = document.getElementById('file-input');
-            const file = fileInput.files[0];
-            if (!file || !currentUser) return alert("ဖိုင်ကို အရင်ရွေးချယ်ပါ");
-
-            document.getElementById('loading-ui').classList.remove('hidden');
-            const text = await file.text();
-            const chunks = splitIntoChunks(text, 8000);
-            let finalRecap = "";
-
-            for(let i=0; i < chunks.length; i++) {
-                updateStatus(`Processing Part ${i+1}/${chunks.length}...`);
-                const result = await callGeminiAPI(chunks[i], i+1, chunks.length);
-                finalRecap += result + "\n\n";
-            }
-
-            // Save to Firestore
-            await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history'), {
-                fileName: file.name,
-                content: finalRecap,
-                timestamp: serverTimestamp()
-            });
-
-            document.getElementById('loading-ui').classList.add('hidden');
-            showView('history');
-        };
-
-        async function callGeminiAPI(chunk, part, total) {
-            const apiKey = "AIzaSyB8gDvyuex5udD0ClOOJNHyI2YuZywVgNU"; // API Key will be injected
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-            const prompt = `Part ${part}/${total}. Provide a very deep, 20-minute read length narrative recap in Myanmar language.`;
+        async function fetchRecap(content, part, total, key) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
             
+            const payload = {
+                contents: [{
+                    parts: [{ 
+                        text: `You are a storytelling narrative expert. This is Part ${part}/${total} of a transcript. 
+                        Provide a HIGHLY DETAILED narrative recap in Myanmar language. 
+                        Focus on summarizing the key conversations, emotions, and specific points in a flowing, readable story format. 
+                        Do not be brief. Write at least 4-5 long paragraphs. \n\n Content: ${content}` 
+                    }]
+                }],
+                safetySettings: [
+                    { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                    { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                    { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                    { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+                ],
+                generationConfig: {
+                    temperature: 0.7,
+                    topP: 0.8,
+                    topK: 40
+                }
+            };
+
             const response = await fetch(url, {
                 method: 'POST',
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: `Transcript Segment:\n${chunk}` }] }],
-                    systemInstruction: { parts: [{ text: prompt }] }
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
+
             const data = await response.json();
+            if (data.error) throw new Error(data.error.message);
+            if (!data.candidates?.[0]?.content?.parts?.[0]?.text) throw new Error("AI Blocked or No Response");
+            
             return data.candidates[0].content.parts[0].text;
         }
 
-        function splitIntoChunks(text, size) {
-            const chunks = [];
-            for (let i = 0; i < text.length; i += size) chunks.push(text.substring(i, i + size));
-            return chunks;
+        function renderChunk(text, num) {
+            const div = document.createElement('div');
+            div.className = "glass-panel p-8 rounded-3xl shadow-2xl transition-all hover:border-emerald-500/30";
+            
+            let formattedHtml = text
+                .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+                .replace(/\n/g, '<br>');
+
+            div.innerHTML = `
+                <div class="flex items-center gap-2 mb-6">
+                    <span class="bg-emerald-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded">PART ${num}</span>
+                    <div class="h-[1px] flex-1 bg-slate-800"></div>
+                </div>
+                <div class="recap-content">${formattedHtml}</div>
+            `;
+            resultsArea.appendChild(div);
+            div.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
-        function loadHistory() {
-            const q = query(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history'));
-            onSnapshot(q, (snapshot) => {
-                const list = document.getElementById('history-list');
-                list.innerHTML = "";
-                snapshot.docs.forEach(d => {
-                    const data = d.data();
-                    const item = document.createElement('div');
-                    item.className = "bg-slate-900 p-6 rounded-2xl border border-slate-800 mb-4";
-                    item.innerHTML = `
-                        <div class="flex justify-between items-center mb-4">
-                            <h3 class="font-bold text-emerald-400">${data.fileName}</h3>
-                            <button onclick="deleteEntry('${d.id}')" class="text-slate-500 hover:text-red-500"><i class="fas fa-trash"></i></button>
-                        </div>
-                        <div class="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">${data.content}</div>
-                    `;
-                    list.appendChild(item);
-                });
-            });
+        function renderError(msg) {
+            const div = document.createElement('div');
+            div.className = "p-6 bg-red-500/10 border border-red-500/20 text-red-500 rounded-2xl";
+            div.innerHTML = `<i class="fas fa-exclamation-triangle mr-2"></i> <strong>Error:</strong> ${msg}`;
+            resultsArea.appendChild(div);
         }
 
-        window.deleteEntry = async (id) => {
-            if(confirm("ဖျက်မှာ သေချာပါသလား?")) {
-                await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', id));
-            }
-        };
-
-        window.showView = (view) => {
-            document.getElementById('view-home').classList.toggle('hidden', view !== 'home');
-            document.getElementById('view-history').classList.toggle('hidden', view !== 'history');
-        };
-
-        function updateStatus(msg) {
-            document.getElementById('status-text').innerText = msg;
+        function splitText(t, s) {
+            const r = [];
+            for (let i = 0; i < t.length; i += s) r.push(t.substring(i, i + s));
+            return r;
         }
     </script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Myanmar:wght@400;700&display=swap');
-        body { font-family: 'Noto Sans Myanmar', sans-serif; background: #020617; color: #f8fafc; }
-        .glass { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.05); }
-    </style>
-</head>
-<body class="min-h-screen flex flex-col">
-
-    <!-- Header -->
-    <nav class="glass sticky top-0 z-50 p-4">
-        <div class="max-w-5xl mx-auto flex justify-between items-center">
-            <div class="flex items-center gap-3 cursor-pointer" onclick="showView('home')">
-                <div class="bg-emerald-600 p-2 rounded-lg"><i class="fas fa-file-signature text-white"></i></div>
-                <h1 class="text-xl font-bold">Recap<span class="text-emerald-500">Pro</span></h1>
-            </div>
-            <div class="flex gap-6 text-sm font-medium">
-                <button onclick="showView('home')" class="hover:text-emerald-400 transition-colors">မူလစာမျက်နှာ</button>
-                <button onclick="showView('history')" class="hover:text-emerald-400 transition-colors">မှတ်တမ်းများ</button>
-            </div>
-        </div>
-    </nav>
-
-    <!-- Main Content -->
-    <main class="flex-1 max-w-4xl mx-auto w-full p-6">
-        
-        <!-- Home View -->
-        <div id="view-home" class="py-12 space-y-10">
-            <div class="text-center space-y-4">
-                <h2 class="text-4xl font-extrabold tracking-tight">Transcript များကို Website တွင် <span class="text-emerald-500 text-glow">Recap လုပ်ပါ</span></h2>
-                <p class="text-slate-400">စာဖတ်ချိန် မိနစ် ၂၀ ကျော်အထိ ကြာမြင့်မည့် အသေးစိတ် Narrative Recap များကို Cloud တွင် သိမ်းဆည်းပါ။</p>
-            </div>
-
-            <div class="glass p-12 rounded-[2.5rem] border-dashed border-2 border-slate-700 hover:border-emerald-500 transition-all text-center group cursor-pointer" onclick="document.getElementById('file-input').click()">
-                <div class="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
-                    <i class="fas fa-cloud-upload-alt text-3xl text-emerald-500"></i>
-                </div>
-                <h3 class="text-xl font-bold mb-2">.txt ဖိုင်ကို ရွေးချယ်တင်ပြပါ</h3>
-                <p class="text-slate-500 text-sm">Drag and drop also supported</p>
-                <input type="file" id="file-input" class="hidden" accept=".txt" onchange="startAnalysis()">
-            </div>
-        </div>
-
-        <!-- History View -->
-        <div id="view-history" class="hidden py-8">
-            <h2 class="text-2xl font-bold mb-8 flex items-center gap-3"><i class="fas fa-history text-emerald-500"></i> သိမ်းဆည်းထားသော မှတ်တမ်းများ</h2>
-            <div id="history-list" class="space-y-6">
-                <!-- Content injected here -->
-            </div>
-        </div>
-    </main>
-
-    <!-- Loading Overlay -->
-    <div id="loading-ui" class="hidden fixed inset-0 bg-black/90 z-[100] flex flex-col items-center justify-center text-center">
-        <div class="relative w-24 h-24 mb-8">
-            <div class="absolute inset-0 border-4 border-emerald-500/20 rounded-full"></div>
-            <div class="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-        </div>
-        <h3 id="status-text" class="text-2xl font-bold mb-2">Processing...</h3>
-        <p class="text-slate-500">အချက်အလက်များကို Cloud ပေါ်တွင် အသေးစိတ် သိမ်းဆည်းနေပါသည်</p>
-    </div>
-
-    <footer class="p-8 text-center text-slate-600 text-xs border-t border-slate-900">
-        &copy; 2025 Recap Pro Web - Built for Professional Narrative Analysis
-    </footer>
-
 </body>
 </html>
