@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recap Master Pro - Web Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, onSnapshot, serverTimestamp, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Configuration (Environment will inject this automatically if using our platform)
+        const firebaseConfig = JSON.parse(window.__firebase_config || '{}');
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = window.__app_id || 'recap-web-pro';
+
+        let currentUser = null;
+
+        // Auth Logic
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                loadHistory();
+            } else {
+                signInAnonymously(auth);
+            }
+        });
+
+        // UI Logic
+        window.startAnalysis = async () => {
+            const fileInput = document.getElementById('file-input');
+            const file = fileInput.files[0];
+            if (!file || !currentUser) return alert("ဖိုင်ကို အရင်ရွေးချယ်ပါ");
+
+            document.getElementById('loading-ui').classList.remove('hidden');
+            const text = await file.text();
+            const chunks = splitIntoChunks(text, 8000);
+            let finalRecap = "";
+
+            for(let i=0; i < chunks.length; i++) {
+                updateStatus(`Processing Part ${i+1}/${chunks.length}...`);
+                const result = await callGeminiAPI(chunks[i], i+1, chunks.length);
+                finalRecap += result + "\n\n";
+            }
+
+            // Save to Firestore
+            await addDoc(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history'), {
+                fileName: file.name,
+                content: finalRecap,
+                timestamp: serverTimestamp()
+            });
+
+            document.getElementById('loading-ui').classList.add('hidden');
+            showView('history');
+        };
+
+        async function callGeminiAPI(chunk, part, total) {
+            const apiKey = "AIzaSyCFsHnvdQUf3UKij14M9j93pY3u1HzR7bg"; // API Key will be injected
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const prompt = `Part ${part}/${total}. Provide a very deep, 20-minute read length narrative recap in Myanmar language.`;
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: `Transcript Segment:\n${chunk}` }] }],
+                    systemInstruction: { parts: [{ text: prompt }] }
+                })
+            });
+            const data = await response.json();
+            return data.candidates[0].content.parts[0].text;
+        }
+
+        function splitIntoChunks(text, size) {
+            const chunks = [];
+            for (let i = 0; i < text.length; i += size) chunks.push(text.substring(i, i + size));
+            return chunks;
+        }
+
+        function loadHistory() {
+            const q = query(collection(db, 'artifacts', appId, 'users', currentUser.uid, 'history'));
+            onSnapshot(q, (snapshot) => {
+                const list = document.getElementById('history-list');
+                list.innerHTML = "";
+                snapshot.docs.forEach(d => {
+                    const data = d.data();
+                    const item = document.createElement('div');
+                    item.className = "bg-slate-900 p-6 rounded-2xl border border-slate-800 mb-4";
+                    item.innerHTML = `
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="font-bold text-emerald-400">${data.fileName}</h3>
+                            <button onclick="deleteEntry('${d.id}')" class="text-slate-500 hover:text-red-500"><i class="fas fa-trash"></i></button>
+                        </div>
+                        <div class="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">${data.content}</div>
+                    `;
+                    list.appendChild(item);
+                });
+            });
+        }
+
+        window.deleteEntry = async (id) => {
+            if(confirm("ဖျက်မှာ သေချာပါသလား?")) {
+                await deleteDoc(doc(db, 'artifacts', appId, 'users', currentUser.uid, 'history', id));
+            }
+        };
+
+        window.showView = (view) => {
+            document.getElementById('view-home').classList.toggle('hidden', view !== 'home');
+            document.getElementById('view-history').classList.toggle('hidden', view !== 'history');
+        };
+
+        function updateStatus(msg) {
+            document.getElementById('status-text').innerText = msg;
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Myanmar:wght@400;700&display=swap');
+        body { font-family: 'Noto Sans Myanmar', sans-serif; background: #020617; color: #f8fafc; }
+        .glass { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.05); }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <nav class="glass sticky top-0 z-50 p-4">
+        <div class="max-w-5xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3 cursor-pointer" onclick="showView('home')">
+                <div class="bg-emerald-600 p-2 rounded-lg"><i class="fas fa-file-signature text-white"></i></div>
+                <h1 class="text-xl font-bold">Recap<span class="text-emerald-500">Pro</span></h1>
+            </div>
+            <div class="flex gap-6 text-sm font-medium">
+                <button onclick="showView('home')" class="hover:text-emerald-400 transition-colors">မူလစာမျက်နှာ</button>
+                <button onclick="showView('history')" class="hover:text-emerald-400 transition-colors">မှတ်တမ်းများ</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-4xl mx-auto w-full p-6">
+        
+        <!-- Home View -->
+        <div id="view-home" class="py-12 space-y-10">
+            <div class="text-center space-y-4">
+                <h2 class="text-4xl font-extrabold tracking-tight">Transcript များကို Website တွင် <span class="text-emerald-500 text-glow">Recap လုပ်ပါ</span></h2>
+                <p class="text-slate-400">စာဖတ်ချိန် မိနစ် ၂၀ ကျော်အထိ ကြာမြင့်မည့် အသေးစိတ် Narrative Recap များကို Cloud တွင် သိမ်းဆည်းပါ။</p>
+            </div>
+
+            <div class="glass p-12 rounded-[2.5rem] border-dashed border-2 border-slate-700 hover:border-emerald-500 transition-all text-center group cursor-pointer" onclick="document.getElementById('file-input').click()">
+                <div class="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform">
+                    <i class="fas fa-cloud-upload-alt text-3xl text-emerald-500"></i>
+                </div>
+                <h3 class="text-xl font-bold mb-2">.txt ဖိုင်ကို ရွေးချယ်တင်ပြပါ</h3>
+                <p class="text-slate-500 text-sm">Drag and drop also supported</p>
+                <input type="file" id="file-input" class="hidden" accept=".txt" onchange="startAnalysis()">
+            </div>
+        </div>
+
+        <!-- History View -->
+        <div id="view-history" class="hidden py-8">
+            <h2 class="text-2xl font-bold mb-8 flex items-center gap-3"><i class="fas fa-history text-emerald-500"></i> သိမ်းဆည်းထားသော မှတ်တမ်းများ</h2>
+            <div id="history-list" class="space-y-6">
+                <!-- Content injected here -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loading-ui" class="hidden fixed inset-0 bg-black/90 z-[100] flex flex-col items-center justify-center text-center">
+        <div class="relative w-24 h-24 mb-8">
+            <div class="absolute inset-0 border-4 border-emerald-500/20 rounded-full"></div>
+            <div class="absolute inset-0 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+        <h3 id="status-text" class="text-2xl font-bold mb-2">Processing...</h3>
+        <p class="text-slate-500">အချက်အလက်များကို Cloud ပေါ်တွင် အသေးစိတ် သိမ်းဆည်းနေပါသည်</p>
+    </div>
+
+    <footer class="p-8 text-center text-slate-600 text-xs border-t border-slate-900">
+        &copy; 2025 Recap Pro Web - Built for Professional Narrative Analysis
+    </footer>
+
+</body>
+</html>
